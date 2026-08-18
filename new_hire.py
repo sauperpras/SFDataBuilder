@@ -145,15 +145,18 @@ def _next_person_id(client) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
-def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
+def create_new_hire(start_date: str, position_id: str, dry_run: bool = True,
+                    overrides: dict = None):
     client = SFClient()
 
     person_id = _next_person_id(client)
     user_id = person_id
     print(f"\n[1/4] Generated personIdExternal={person_id}, userId={user_id}")
 
-    print(f"\n[2/4] Fetching org defaults from FOPosition({position_id}) ...")
+    print(f"\n[2/4] Fetching org defaults from position {position_id} ...")
     position_defaults = fetch_position_defaults(client, position_id)
+    if overrides:
+        position_defaults.update(overrides)
     print(f"  Org fields: {json.dumps(position_defaults)}")
 
     payload = build_new_hire_payload(person_id, user_id, start_date, position_id, position_defaults)
@@ -174,16 +177,36 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
 
 def main():
     parser = argparse.ArgumentParser(description="Create a new hire in SF Employee Central")
-    parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD")
-    parser.add_argument("--position",   required=True, help="Position external code")
+    parser.add_argument("--start-date",     required=True, help="Start date YYYY-MM-DD")
+    parser.add_argument("--position",       required=True, help="Position external code")
+    parser.add_argument("--company",        help="Legal entity / company code (overrides position lookup)")
+    parser.add_argument("--business-unit",  help="Business unit code")
+    parser.add_argument("--division",       help="Division code")
+    parser.add_argument("--department",     help="Department code")
+    parser.add_argument("--job-code",       help="Job code")
+    parser.add_argument("--cost-center",    help="Cost center code")
+    parser.add_argument("--location",       help="Location code")
+    parser.add_argument("--employee-class", help="Employee class picklist ID")
     parser.add_argument("--dry-run", action="store_true", default=True,
                         help="Print payload without calling the API (default: True)")
     parser.add_argument("--live", action="store_true",
                         help="Actually POST to the API (disables dry-run)")
     args = parser.parse_args()
 
+    overrides = {k: v for k, v in {
+        "company":       args.company,
+        "businessUnit":  args.business_unit,
+        "division":      args.division,
+        "department":    args.department,
+        "jobCode":       args.job_code,
+        "costCenter":    args.cost_center,
+        "location":      args.location,
+        "employeeClass": args.employee_class,
+    }.items() if v is not None}
+
     dry_run = not args.live
-    create_new_hire(start_date=args.start_date, position_id=args.position, dry_run=dry_run)
+    create_new_hire(start_date=args.start_date, position_id=args.position,
+                    dry_run=dry_run, overrides=overrides)
 
 
 if __name__ == "__main__":
