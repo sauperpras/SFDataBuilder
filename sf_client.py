@@ -97,7 +97,7 @@ class SFClient:
                 "Content-Type: application/http",
                 "Content-Transfer-Encoding: binary",
                 "",
-                "POST upsert HTTP/1.1",
+                f"POST {op['entity']} HTTP/1.1",
             ] + inner_headers + [
                 "",
                 json.dumps(payload),
