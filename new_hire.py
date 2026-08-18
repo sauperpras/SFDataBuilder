@@ -126,14 +126,13 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
     user_id = _new_user_id(person_id)
     print(f"\n[1/3] Generated personIdExternal={person_id}, userId={user_id}")
 
-    # PerPerson and EmpEmployment are not directly insertable in this tenant.
-    # Step 1: create User + personal data.
-    # Step 2: create employment via EmpJob with eventReason to trigger the hire event.
+    # Each entity is in its own changeset so a failure on one doesn't roll back the others.
     operations = [
-        {"entity": "User",        "payload": build_user(user_id, start_date)},
-        {"entity": "PerPersonal", "payload": build_per_personal(person_id, start_date)},
-        {"entity": "PerEmail",    "payload": build_per_email(person_id, start_date)},
-        {"entity": "EmpJob",      "payload": build_emp_job(user_id, start_date, position_id)},
+        {"entity": "User",          "payload": build_user(user_id, start_date)},
+        {"entity": "EmpEmployment", "payload": build_emp_employment(person_id, user_id, start_date)},
+        {"entity": "EmpJob",        "payload": build_emp_job(user_id, start_date, position_id)},
+        {"entity": "PerPersonal",   "payload": build_per_personal(person_id, start_date)},
+        {"entity": "PerEmail",      "payload": build_per_email(person_id, start_date)},
     ]
 
     print("\n[2/3] Batch operations:")
@@ -146,7 +145,7 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
         return
 
     print("\n[3/3] Sending $batch request ...")
-    response_text = client.batch(operations)
+    response_text = client.batch(operations, print_request=True)
     print(response_text)
 
     # Check for errors in the batch response

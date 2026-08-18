@@ -66,35 +66,53 @@ class SFClient:
             return {}
         return resp.json()
 
-    def batch(self, operations: list) -> str:
+    def batch(self, operations: list, print_request: bool = False) -> str:
         """
         Execute multiple POST operations in a single OData $batch request.
+        Each operation gets its own changeset so failures don't cascade.
         Each operation: {"entity": "EntityName", "payload": {...}}
         Returns the raw multipart response text.
         """
         batch_id = f"batch_create_employee_{uuid.uuid4().hex[:8]}"
-        cs_id = f"changeset_employee_data_{uuid.uuid4().hex[:8]}"
-
-        parts = [f"--{batch_id}", f"Content-Type: multipart/mixed; boundary={cs_id}", ""]
-
         csrf = self.session.headers.get("X-CSRF-Token", "")
+
+        parts = []
         for op in operations:
+            cs_id = f"changeset_employee_{uuid.uuid4().hex[:8]}"
             inner_headers = [
                 "Content-Type: application/json",
                 "successfactors-sourcetype: odata",
             ]
             if csrf:
                 inner_headers.append(f"X-CSRF-Token: {csrf}")
-            parts += (
-                [f"--{cs_id}", "Content-Type: application/http", "Content-Transfer-Encoding: binary", ""]
-                + [f"POST {op['entity']} HTTP/1.1"]
-                + inner_headers
-                + ["", json.dumps(op["payload"]), ""]
-            )
 
-        parts += [f"--{cs_id}--", f"--{batch_id}--", ""]
+            parts += [
+                f"--{batch_id}",
+                f"Content-Type: multipart/mixed; boundary={cs_id}",
+                "",
+                f"--{cs_id}",
+                "Content-Type: application/http",
+                "Content-Transfer-Encoding: binary",
+                "",
+                f"POST {op['entity']} HTTP/1.1",
+            ] + inner_headers + [
+                "",
+                json.dumps(op["payload"]),
+                "",
+                f"--{cs_id}--",
+                "",
+            ]
+
+        parts.append(f"--{batch_id}--")
+        parts.append("")
 
         body = "\r\n".join(parts)
+
+        if print_request:
+            print("\n--- BATCH REQUEST BODY ---")
+            print(body)
+            print("--- END BATCH REQUEST BODY ---\n")
+
         url = f"{self.api_url}/odata/v2/$batch"
         resp = self.session.post(
             url,
