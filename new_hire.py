@@ -45,10 +45,9 @@ def build_per_personal(person_id: str, start_date: str) -> dict:
     }
 
 
-def build_per_email(person_id: str, start_date: str) -> dict:
+def build_per_email(person_id: str) -> dict:
     return {
         "personIdExternal": person_id,
-        "startDate": f"/Date({_to_epoch_ms(start_date)})/",
         "emailType": "8448",            # Business — verify with your instance
         "isPrimary": True,
         "emailAddress": "newhire@example.com",  # placeholder
@@ -132,7 +131,7 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
         {"entity": "EmpEmployment", "payload": build_emp_employment(person_id, user_id, start_date)},
         {"entity": "EmpJob",        "payload": build_emp_job(user_id, start_date, position_id)},
         {"entity": "PerPersonal",   "payload": build_per_personal(person_id, start_date)},
-        {"entity": "PerEmail",      "payload": build_per_email(person_id, start_date)},
+        {"entity": "PerEmail",      "payload": build_per_email(person_id)},
     ]
 
     print("\n[2/3] Batch operations:")
