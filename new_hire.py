@@ -16,79 +16,62 @@ from sf_client import SFClient
 
 
 # ---------------------------------------------------------------------------
-# Payload builders
+# Payload builder
 # ---------------------------------------------------------------------------
 
-def build_user(user_id: str, start_date: str) -> dict:
-    return {
-        "userId": user_id,
-        "username": user_id,
-        "status": "Active",
-        "hireDate": f"/Date({_to_epoch_ms(start_date)})/",
-    }
-
-
-def build_per_person(person_id: str) -> dict:
-    return {
-        "personIdExternal": person_id,
-    }
-
-
-def build_per_personal(person_id: str, start_date: str) -> dict:
-    return {
-        "personIdExternal": person_id,
-        "startDate": f"/Date({_to_epoch_ms(start_date)})/",
-        "firstName": "New",             # placeholder
-        "lastName": "Hire",             # placeholder
-        "gender": "M",                  # placeholder
-    }
-
-
-def build_per_email(person_id: str) -> dict:
-    return {
-        "personIdExternal": person_id,
-        "emailType": "8448",            # Business — verify with your instance
-        "isPrimary": True,
-        "emailAddress": "newhire@example.com",  # placeholder
-    }
-
-
-def build_emp_employment(person_id: str, user_id: str, start_date: str) -> dict:
+def build_new_hire_payload(person_id: str, user_id: str, start_date: str, position_id: str) -> dict:
     epoch = f"/Date({_to_epoch_ms(start_date)})/"
     return {
+        "__metadata": {"uri": "EmpEmployment"},
         "personIdExternal": person_id,
         "userId": user_id,
         "assignmentIdExternal": person_id,
         "assignmentClass": "ST",
         "isContingentWorker": False,
-        "isECRecord": True,
         "startDate": epoch,
         "originalStartDate": epoch,
-        "seniorityDate": epoch,
-        "serviceDate": epoch,
-        "firstDateWorked": epoch,
-        "benefitsEligibilityStartDate": epoch,
-    }
-
-
-def build_emp_job(user_id: str, start_date: str, position_id: str) -> dict:
-    return {
-        "userId": user_id,
-        "startDate": f"/Date({_to_epoch_ms(start_date)})/",
-        "position": position_id,
-        "seqNumber": "1",
-        "emplStatus": "4595",           # Active picklist ID — verify with your instance
-        "eventReason": "HIRNEW",
-        # Fields below are typically derived from Position in SF EC.
-        # "company": "...",
-        # "businessUnit": "...",
-        # "division": "...",
-        # "department": "...",
-        # "jobCode": "...",
-        # "costCenter": "...",
-        # "location": "...",
-        # "employeeClass": "...",       # picklist ID
-        # "employmentType": "...",      # picklist ID
+        "personNav": {
+            "personIdExternal": person_id,
+            "personalInfoNav": {
+                "results": [
+                    {
+                        "personIdExternal": person_id,
+                        "startDate": epoch,
+                        "firstName": "New",             # placeholder
+                        "lastName": "Hire",             # placeholder
+                        "gender": "M",                  # placeholder
+                    }
+                ]
+            },
+            "emailNav": {
+                "results": [
+                    {
+                        "personIdExternal": person_id,
+                        "emailType": "8448",            # Business — verify with your instance
+                        "isPrimary": True,
+                        "emailAddress": "newhire@example.com",  # placeholder
+                    }
+                ]
+            },
+        },
+        "jobInfoNav": {
+            "results": [
+                {
+                    "userId": user_id,
+                    "startDate": epoch,
+                    "position": position_id,
+                    "seqNumber": "1",
+                    "emplStatus": "4595",               # Active picklist ID — verify with your instance
+                    "eventReason": "HIRNEW",
+                }
+            ]
+        },
+        "userNav": {
+            "userId": user_id,
+            "username": user_id,
+            "status": "Active",
+            "hireDate": epoch,
+        },
     }
 
 
@@ -135,33 +118,20 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
     user_id = person_id
     print(f"\n[1/3] Generated personIdExternal={person_id}, userId={user_id}")
 
-    # Each entity is in its own changeset so a failure on one doesn't roll back the others.
-    operations = [
-        {"entity": "User",          "payload": build_user(user_id, start_date)},
-        {"entity": "EmpEmployment", "payload": build_emp_employment(person_id, user_id, start_date)},
-        {"entity": "PerPersonal",   "payload": build_per_personal(person_id, start_date)},
-        {"entity": "EmpJob",        "payload": build_emp_job(user_id, start_date, position_id)},
-        {"entity": "PerEmail",      "payload": build_per_email(person_id)},
-    ]
+    payload = build_new_hire_payload(person_id, user_id, start_date, position_id)
 
-    print("\n[2/3] Batch operations:")
-    for op in operations:
-        print(f"  POST {op['entity']}")
-        print(f"  {json.dumps(op['payload'], indent=4)}")
+    print("\n[2/3] Payload:")
+    print(json.dumps(payload, indent=4))
 
     if dry_run:
-        print("\n[DRY RUN] Operations shown above — nothing was sent to SuccessFactors.")
+        print("\n[DRY RUN] Payload shown above — nothing was sent to SuccessFactors.")
         return
 
-    print("\n[3/3] Sending $batch request ...")
-    response_text = client.batch(operations, print_request=True)
-    print(response_text)
+    print("\n[3/3] Sending POST to upsert?purgeType=full ...")
+    result = client.deep_upsert(payload)
+    print(json.dumps(result, indent=4) if result else "(empty response — likely 204 No Content)")
 
-    # Check for errors in the batch response
-    if '"error"' in response_text or 'HTTP/1.1 4' in response_text or 'HTTP/1.1 5' in response_text:
-        print("\nWARNING: One or more batch operations may have failed — check response above.")
-    else:
-        print(f"\nNew hire created. personIdExternal={person_id}, userId={user_id}")
+    print(f"\nNew hire created. personIdExternal={person_id}, userId={user_id}")
 
 
 def main():
