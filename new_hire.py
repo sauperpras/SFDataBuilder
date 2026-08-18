@@ -10,7 +10,6 @@ With --dry-run the payload is printed but NOT posted to SF.
 import argparse
 import json
 import sys
-import uuid
 from datetime import date
 
 from sf_client import SFClient
@@ -104,14 +103,25 @@ def _to_epoch_ms(date_str: str) -> int:
     return int((d - epoch).total_seconds() * 1000)
 
 
-def _new_person_id() -> str:
-    """Generate a unique external person ID. Replace with your ID scheme."""
-    return f"NH-{uuid.uuid4().hex[:8].upper()}"
+ID_START = 80_000_000
 
 
-def _new_user_id(person_id: str) -> str:
-    """Derive a userId from the personIdExternal. Adjust to your convention."""
-    return person_id
+def _next_person_id(client) -> str:
+    """
+    Find the highest userId >= 80000000 in SF and return the next available ID.
+    Falls back to 80000000 if none exist yet.
+    """
+    result = client.get("User", params={
+        "$filter": "userId ge '80000000'",
+        "$orderby": "userId desc",
+        "$top": "1",
+        "$select": "userId",
+    })
+    rows = result.get("d", {}).get("results", [])
+    if rows:
+        highest = int(rows[0]["userId"])
+        return str(highest + 1)
+    return str(ID_START)
 
 
 # ---------------------------------------------------------------------------
@@ -121,8 +131,8 @@ def _new_user_id(person_id: str) -> str:
 def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
     client = SFClient()
 
-    person_id = _new_person_id()
-    user_id = _new_user_id(person_id)
+    person_id = _next_person_id(client)
+    user_id = person_id
     print(f"\n[1/3] Generated personIdExternal={person_id}, userId={user_id}")
 
     # Each entity is in its own changeset so a failure on one doesn't roll back the others.
