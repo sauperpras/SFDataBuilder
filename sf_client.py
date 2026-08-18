@@ -30,6 +30,18 @@ class SFClient:
             "Content-Type": "application/json",
             "successfactors-sourcetype": "odata",
         })
+        self._fetch_csrf_token()
+
+    def _fetch_csrf_token(self):
+        """Fetch and cache a CSRF token required by SAP for all write operations."""
+        try:
+            url = f"{self.api_url}/odata/v2/"
+            resp = self.session.get(url, headers={"X-CSRF-Token": "Fetch"}, timeout=10)
+            token = resp.headers.get("X-CSRF-Token")
+            if token:
+                self.session.headers["X-CSRF-Token"] = token
+        except Exception:
+            pass  # token unavailable; proceed without it
 
     def get(self, entity: str, params: dict = None) -> dict:
         url = f"{self.api_url}/odata/v2/{entity}"
@@ -65,19 +77,20 @@ class SFClient:
 
         parts = [f"--{batch_id}", f"Content-Type: multipart/mixed; boundary={cs_id}", ""]
 
+        csrf = self.session.headers.get("X-CSRF-Token", "")
         for op in operations:
-            parts += [
-                f"--{cs_id}",
-                "Content-Type: application/http",
-                "Content-Transfer-Encoding: binary",
-                "",
-                f"POST {op['entity']} HTTP/1.1",
+            inner_headers = [
                 "Content-Type: application/json",
                 "successfactors-sourcetype: odata",
-                "",
-                json.dumps(op["payload"]),
-                "",
             ]
+            if csrf:
+                inner_headers.append(f"X-CSRF-Token: {csrf}")
+            parts += (
+                [f"--{cs_id}", "Content-Type: application/http", "Content-Transfer-Encoding: binary", ""]
+                + [f"POST {op['entity']} HTTP/1.1"]
+                + inner_headers
+                + ["", json.dumps(op["payload"]), ""]
+            )
 
         parts += [f"--{cs_id}--", f"--{batch_id}--", ""]
 
