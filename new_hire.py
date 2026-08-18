@@ -112,15 +112,15 @@ def _next_person_id(client) -> str:
     Falls back to 80000000 if none exist yet.
     """
     result = client.get("User", params={
-        "$filter": "userId ge '80000000'",
+        "$filter": "userId ge '80000000' and userId le '99999999'",
         "$orderby": "userId desc",
-        "$top": "1",
+        "$top": "10",
         "$select": "userId",
     })
     rows = result.get("d", {}).get("results", [])
-    if rows:
-        highest = int(rows[0]["userId"])
-        return str(highest + 1)
+    numeric = [int(r["userId"]) for r in rows if r["userId"].isdigit()]
+    if numeric:
+        return str(max(numeric) + 1)
     return str(ID_START)
 
 
