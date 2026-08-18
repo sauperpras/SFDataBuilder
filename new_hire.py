@@ -139,8 +139,8 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
     operations = [
         {"entity": "User",          "payload": build_user(user_id, start_date)},
         {"entity": "EmpEmployment", "payload": build_emp_employment(person_id, user_id, start_date)},
-        {"entity": "EmpJob",        "payload": build_emp_job(user_id, start_date, position_id)},
         {"entity": "PerPersonal",   "payload": build_per_personal(person_id, start_date)},
+        {"entity": "EmpJob",        "payload": build_emp_job(user_id, start_date, position_id)},
         {"entity": "PerEmail",      "payload": build_per_email(person_id)},
     ]
 

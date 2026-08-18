@@ -69,28 +69,30 @@ class SFClient:
     def batch(self, operations: list, print_request: bool = False) -> str:
         """
         Execute multiple POST operations in a single OData $batch request.
-        Each operation gets its own changeset so failures don't cascade.
+        All operations share one changeset so they execute as a single transaction.
         Each operation: {"entity": "EntityName", "payload": {...}}
         Returns the raw multipart response text.
         """
         batch_id = f"batch_create_employee_{uuid.uuid4().hex[:8]}"
+        cs_id = "changeset_single_transaction"
         csrf = self.session.headers.get("X-CSRF-Token", "")
 
-        parts = []
-        for op in operations:
-            cs_id = f"changeset_employee_{uuid.uuid4().hex[:8]}"
-            inner_headers = [
-                "Content-Type: application/json",
-                "successfactors-sourcetype: odata",
-            ]
-            if csrf:
-                inner_headers.append(f"X-CSRF-Token: {csrf}")
+        inner_headers = [
+            "Content-Type: application/json",
+            "successfactors-sourcetype: odata",
+        ]
+        if csrf:
+            inner_headers.append(f"X-CSRF-Token: {csrf}")
 
+        parts = [
+            f"--{batch_id}",
+            f"Content-Type: multipart/mixed; boundary={cs_id}",
+            "",
+        ]
+
+        for op in operations:
             payload = {"__metadata": {"uri": op["entity"]}, **op["payload"]}
             parts += [
-                f"--{batch_id}",
-                f"Content-Type: multipart/mixed; boundary={cs_id}",
-                "",
                 f"--{cs_id}",
                 "Content-Type: application/http",
                 "Content-Transfer-Encoding: binary",
@@ -100,12 +102,14 @@ class SFClient:
                 "",
                 json.dumps(payload),
                 "",
-                f"--{cs_id}--",
-                "",
             ]
 
-        parts.append(f"--{batch_id}--")
-        parts.append("")
+        parts += [
+            f"--{cs_id}--",
+            "",
+            f"--{batch_id}--",
+            "",
+        ]
 
         body = "\r\n".join(parts)
 
