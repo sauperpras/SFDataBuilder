@@ -19,7 +19,8 @@ from sf_client import SFClient
 # Payload builder
 # ---------------------------------------------------------------------------
 
-_POSITION_ORG_FIELDS = ("company", "businessUnit", "division", "department", "location", "jobCode")
+_POSITION_ORG_FIELDS = ("company", "businessUnit", "division", "department", "location", "jobCode",
+                        "payScaleType", "payScaleArea")
 
 
 def fetch_position_defaults(client, position_id: str) -> dict:
@@ -29,7 +30,7 @@ def fetch_position_defaults(client, position_id: str) -> dict:
     """
     result = client.get("Position", params={
         "$filter": f"code eq '{position_id}'",
-        "$select": "code,company,businessUnit,division,department,location,jobCode",
+        "$select": "code,company,businessUnit,division,department,location,jobCode,payScaleType,payScaleArea",
     })
     rows = result.get("d", {}).get("results", [])
     if not rows:
@@ -52,6 +53,7 @@ def build_new_hire_payload(person_id: str, user_id: str, start_date: str, positi
         "isContingentWorker": False,
         "startDate": epoch,
         "originalStartDate": epoch,
+        "firstDateWorked": epoch,
         "personNav": {
             "personIdExternal": person_id,
             "personalInfoNav": {
@@ -181,7 +183,9 @@ def main():
     parser.add_argument("--job-code",       help="Job code")
     parser.add_argument("--cost-center",    help="Cost center code")
     parser.add_argument("--location",       help="Location code")
-    parser.add_argument("--employee-class", help="Employee class picklist ID")
+    parser.add_argument("--employee-class",  help="Employee class picklist ID")
+    parser.add_argument("--pay-scale-type",  default="US1", help="Pay scale type code (default: US1)")
+    parser.add_argument("--pay-scale-area",  default="US2", help="Pay scale area code (default: US2)")
     parser.add_argument("--dry-run", action="store_true", default=True,
                         help="Print payload without calling the API (default: True)")
     parser.add_argument("--live", action="store_true",
@@ -197,6 +201,8 @@ def main():
         "costCenter":    args.cost_center,
         "location":      args.location,
         "employeeClass": args.employee_class,
+        "payScaleType":  args.pay_scale_type,
+        "payScaleArea":  args.pay_scale_area,
     }.items() if v is not None}
 
     dry_run = not args.live
