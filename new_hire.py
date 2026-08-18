@@ -18,15 +18,19 @@ from sf_client import SFClient
 
 # ---------------------------------------------------------------------------
 # Payload builders
-# Minimum required fields are based on standard EC OData v2 new-hire flow.
-# Adjust once the OData dictionary is reviewed for this specific instance.
 # ---------------------------------------------------------------------------
+
+def build_user(user_id: str) -> dict:
+    return {
+        "userId": user_id,
+        "username": user_id,
+        "status": "Active",
+    }
+
 
 def build_per_person(person_id: str) -> dict:
     return {
         "personIdExternal": person_id,
-        "dateOfBirth": "/Date(0)/",     # placeholder — update with real DOB
-        "countryOfBirth": "USA",        # 3-letter ISO code as used in this instance
     }
 
 
@@ -75,9 +79,8 @@ def build_emp_job(user_id: str, start_date: str, position_id: str) -> dict:
         "position": position_id,
         "seqNumber": "1",
         "emplStatus": "4595",           # Active picklist ID — verify with your instance
-        "eventReason": "HIRNEW",        # New hire event reason
-        # Fields below are typically derived from Position in SF EC;
-        # leaving them commented so SF can default them from the position.
+        "eventReason": "HIRNEW",
+        # Fields below are typically derived from Position in SF EC.
         # "company": "...",
         # "businessUnit": "...",
         # "division": "...",
@@ -101,26 +104,6 @@ def _to_epoch_ms(date_str: str) -> int:
     return int((d - epoch).total_seconds() * 1000)
 
 
-def _sf_datetime(date_str: str) -> str:
-    """Convert YYYY-MM-DD to SF OData key datetime literal: datetime'YYYY-MM-DDTHH:MM:SS'."""
-    return f"datetime'{date_str}T00:00:00'"
-
-
-def _entity_key(entity: str, payload: dict, start_date: str) -> str:
-    """Return the OData key path for upsert PUT (e.g. PerPerson('id'))."""
-    pid = payload.get("personIdExternal", "")
-    uid = payload.get("userId", "")
-    dt  = _sf_datetime(start_date)
-    keys = {
-        "PerPerson":     f"PerPerson('{pid}')",
-        "PerPersonal":   f"PerPersonal(personIdExternal='{pid}',startDate={dt})",
-        "PerEmail":      f"PerEmail(personIdExternal='{pid}',startDate={dt},emailType='{payload.get('emailType', '')}')",
-        "EmpEmployment": f"EmpEmployment(personIdExternal='{pid}',userId='{uid}')",
-        "EmpJob":        f"EmpJob(seqNumber=1L,startDate={dt},userId='{uid}')",
-    }
-    return keys[entity]
-
-
 def _new_person_id() -> str:
     """Generate a unique external person ID. Replace with your ID scheme."""
     return f"NH-{uuid.uuid4().hex[:8].upper()}"
@@ -140,32 +123,36 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
 
     person_id = _new_person_id()
     user_id = _new_user_id(person_id)
-    print(f"\n[1/4] Generated personIdExternal={person_id}, userId={user_id}")
+    print(f"\n[1/3] Generated personIdExternal={person_id}, userId={user_id}")
 
-    # PerPerson is auto-created by SF when PerPersonal is upserted; do not write it directly.
-    payloads = {
-        "PerPersonal":    build_per_personal(person_id, start_date),
-        "PerEmail":       build_per_email(person_id, start_date),
-        "EmpEmployment":  build_emp_employment(person_id, user_id, start_date),
-        "EmpJob":         build_emp_job(user_id, start_date, position_id),
-    }
+    # Order matches the sample batch: User → PerPerson → EmpEmployment → EmpJob → PerPersonal → PerEmail
+    operations = [
+        {"entity": "User",          "payload": build_user(user_id)},
+        {"entity": "PerPerson",     "payload": build_per_person(person_id)},
+        {"entity": "EmpEmployment", "payload": build_emp_employment(person_id, user_id, start_date)},
+        {"entity": "EmpJob",        "payload": build_emp_job(user_id, start_date, position_id)},
+        {"entity": "PerPersonal",   "payload": build_per_personal(person_id, start_date)},
+        {"entity": "PerEmail",      "payload": build_per_email(person_id, start_date)},
+    ]
 
-    print("\n[2/4] Payloads:")
-    print(json.dumps(payloads, indent=2))
+    print("\n[2/3] Batch operations:")
+    for op in operations:
+        print(f"  POST {op['entity']}")
+        print(f"  {json.dumps(op['payload'], indent=4)}")
 
     if dry_run:
-        print("\n[DRY RUN] Payloads shown above — nothing was sent to SuccessFactors.")
+        print("\n[DRY RUN] Operations shown above — nothing was sent to SuccessFactors.")
         return
 
-    # Post each entity in dependency order. PerPerson is auto-created by SF via PerPersonal.
-    print("\n[3/4] Posting entities ...")
-    for entity, payload in payloads.items():
-        print(f"  POST {entity} ...", end=" ", flush=True)
-        result = client.post(entity, payload)
-        ref = result.get('d', {}).get('personIdExternal') or result.get('d', {}).get('userId', '') or "(no content)"
-        print(f"OK  →  {ref}")
+    print("\n[3/3] Sending $batch request ...")
+    response_text = client.batch(operations)
+    print(response_text)
 
-    print(f"\n[4/4] New hire created. personIdExternal={person_id}, userId={user_id}")
+    # Check for errors in the batch response
+    if '"error"' in response_text or 'HTTP/1.1 4' in response_text or 'HTTP/1.1 5' in response_text:
+        print("\nWARNING: One or more batch operations may have failed — check response above.")
+    else:
+        print(f"\nNew hire created. personIdExternal={person_id}, userId={user_id}")
 
 
 def main():

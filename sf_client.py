@@ -5,6 +5,7 @@ Uses HTTP Basic Auth (username@company:password).
 
 import json
 import os
+import uuid
 import requests
 from requests.auth import HTTPBasicAuth
 
@@ -48,10 +49,46 @@ class SFClient:
         resp = self.session.put(url, json=payload)
         if not resp.ok:
             raise Exception(f"PUT {key_path} → {resp.status_code}: {resp.text}")
-        # SF returns 204 No Content on success for PUT; return empty dict in that case
         if resp.status_code == 204 or not resp.text.strip():
             return {}
         return resp.json()
+
+    def batch(self, operations: list) -> str:
+        """
+        Execute multiple POST operations in a single OData $batch request.
+        Each operation: {"entity": "EntityName", "payload": {...}}
+        Returns the raw multipart response text.
+        """
+        batch_id = f"batch_create_employee_{uuid.uuid4().hex[:8]}"
+        cs_id = f"changeset_employee_data_{uuid.uuid4().hex[:8]}"
+
+        parts = [f"--{batch_id}", f"Content-Type: multipart/mixed; boundary={cs_id}", ""]
+
+        for op in operations:
+            parts += [
+                f"--{cs_id}",
+                "Content-Type: application/http",
+                "Content-Transfer-Encoding: binary",
+                "",
+                f"POST {op['entity']} HTTP/1.1",
+                "Content-Type: application/json",
+                "",
+                json.dumps(op["payload"]),
+                "",
+            ]
+
+        parts += [f"--{cs_id}--", f"--{batch_id}--", ""]
+
+        body = "\r\n".join(parts)
+        url = f"{self.api_url}/odata/v2/$batch"
+        resp = self.session.post(
+            url,
+            data=body.encode("utf-8"),
+            headers={"Content-Type": f"multipart/mixed; boundary={batch_id}"},
+        )
+        if not resp.ok:
+            raise Exception(f"$batch → {resp.status_code}: {resp.text}")
+        return resp.text
 
     def metadata(self) -> str:
         """Fetch raw $metadata XML for entity discovery."""
