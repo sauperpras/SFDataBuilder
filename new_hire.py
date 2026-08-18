@@ -118,22 +118,9 @@ def _new_user_id(person_id: str) -> str:
 def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
     client = SFClient()
 
-    # Step 0: validate the position exists
-    print(f"\n[1/5] Looking up position {position_id} ...")
-    if not dry_run:
-        try:
-            pos_result = client.check_position(position_id)
-            pos = pos_result.get("d", {})
-            print(f"      Found: externalCode={pos.get('externalCode')}")
-        except Exception as e:
-            print(f"ERROR: Position '{position_id}' not found or inaccessible: {e}")
-            sys.exit(1)
-    else:
-        print("      (dry-run: skipping position lookup)")
-
     person_id = _new_person_id()
     user_id = _new_user_id(person_id)
-    print(f"\n[2/5] Generated personIdExternal={person_id}, userId={user_id}")
+    print(f"\n[1/4] Generated personIdExternal={person_id}, userId={user_id}")
 
     payloads = {
         "PerPerson":      build_per_person(person_id),
@@ -143,21 +130,21 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
         "EmpJob":         build_emp_job(user_id, start_date, position_id),
     }
 
-    print("\n[3/5] Payloads:")
+    print("\n[2/4] Payloads:")
     print(json.dumps(payloads, indent=2))
 
     if dry_run:
         print("\n[DRY RUN] Payloads shown above — nothing was sent to SuccessFactors.")
         return
 
-    # Step 4: post in order (PerPerson must exist before PerPersonal/EmpEmployment)
-    print("\n[4/5] Posting entities ...")
+    # Post in order (PerPerson must exist before PerPersonal/EmpEmployment)
+    print("\n[3/4] Posting entities ...")
     for entity, payload in payloads.items():
         print(f"  POST {entity} ...", end=" ")
         result = client.post(entity, payload)
         print(f"OK  →  {result.get('d', {}).get('personIdExternal') or result.get('d', {}).get('userId', '')}")
 
-    print(f"\n[5/5] New hire created. personIdExternal={person_id}, userId={user_id}")
+    print(f"\n[4/4] New hire created. personIdExternal={person_id}, userId={user_id}")
 
 
 def main():
