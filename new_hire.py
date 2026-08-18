@@ -28,17 +28,20 @@ def fetch_position_defaults(client, position_id: str) -> dict:
     Query MDF Position by code to get org fields required by EmpJob.
     Field names map 1:1 from Position to jobInfoNav (company, businessUnit, etc.).
     """
-    result = client.get("Position", params={
-        "$filter": f"code eq '{position_id}'",
-        "$select": "code,company,businessUnit,division,department,location,jobCode,payScaleType,payScaleArea",
-    })
-    rows = result.get("d", {}).get("results", [])
-    if not rows:
-        print(f"  WARNING: No Position found with code={position_id} — jobInfoNav will have no org fields.")
+    try:
+        result = client.get("Position", params={
+            "$filter": f"code eq '{position_id}'",
+            "$select": "code,company,businessUnit,division,department,location,jobCode,payScaleType,payScaleArea",
+        })
+        rows = result.get("d", {}).get("results", [])
+        if not rows:
+            print(f"  WARNING: No Position found with code={position_id} — org fields must be supplied via CLI args.")
+            return {}
+        pos = rows[0]
+        return {f: pos[f] for f in _POSITION_ORG_FIELDS if pos.get(f)}
+    except Exception as e:
+        print(f"  WARNING: Position query failed ({e}) — org fields must be supplied via CLI args.")
         return {}
-    pos = rows[0]
-    defaults = {f: pos[f] for f in _POSITION_ORG_FIELDS if pos.get(f)}
-    return defaults
 
 
 def build_new_hire_payload(person_id: str, user_id: str, start_date: str, position_id: str,
