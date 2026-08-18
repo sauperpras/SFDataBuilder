@@ -28,6 +28,7 @@ class SFClient:
         self.session.headers.update({
             "Accept": "application/json",
             "Content-Type": "application/json",
+            "successfactors-sourcetype": "odata",
         })
 
     def get(self, entity: str, params: dict = None) -> dict:

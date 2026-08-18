@@ -125,10 +125,10 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
     user_id = _new_user_id(person_id)
     print(f"\n[1/3] Generated personIdExternal={person_id}, userId={user_id}")
 
-    # Order matches the sample batch: User → PerPerson → EmpEmployment → EmpJob → PerPersonal → PerEmail
+    # PerPerson is not insertable; User creation auto-creates it.
+    # Order: User → EmpEmployment → EmpJob → PerPersonal → PerEmail
     operations = [
         {"entity": "User",          "payload": build_user(user_id)},
-        {"entity": "PerPerson",     "payload": build_per_person(person_id)},
         {"entity": "EmpEmployment", "payload": build_emp_employment(person_id, user_id, start_date)},
         {"entity": "EmpJob",        "payload": build_emp_job(user_id, start_date, position_id)},
         {"entity": "PerPersonal",   "payload": build_per_personal(person_id, start_date)},
