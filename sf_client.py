@@ -73,6 +73,7 @@ class SFClient:
                 "",
                 f"POST {op['entity']} HTTP/1.1",
                 "Content-Type: application/json",
+                "successfactors-sourcetype: odata",
                 "",
                 json.dumps(op["payload"]),
                 "",
