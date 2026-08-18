@@ -157,13 +157,12 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
         print("\n[DRY RUN] Payloads shown above — nothing was sent to SuccessFactors.")
         return
 
-    # Upsert in order (PerPerson must exist before PerPersonal/EmpEmployment)
-    print("\n[3/4] Upserting entities ...")
+    # Post each entity in dependency order. PerPerson is auto-created by SF via PerPersonal.
+    print("\n[3/4] Posting entities ...")
     for entity, payload in payloads.items():
-        key_path = _entity_key(entity, payload, start_date)
-        print(f"  PUT {key_path} ...", end=" ")
-        result = client.upsert(key_path, payload)
-        ref = result.get('d', {}).get('personIdExternal') or result.get('d', {}).get('userId', '') or "(204 No Content)"
+        print(f"  POST {entity} ...", end=" ", flush=True)
+        result = client.post(entity, payload)
+        ref = result.get('d', {}).get('personIdExternal') or result.get('d', {}).get('userId', '') or "(no content)"
         print(f"OK  →  {ref}")
 
     print(f"\n[4/4] New hire created. personIdExternal={person_id}, userId={user_id}")
