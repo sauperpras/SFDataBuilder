@@ -52,6 +52,5 @@ class SFClient:
         """Look up a Position record by externalCode."""
         return self.get("Position", params={
             "$filter": f"externalCode eq '{position_id}'",
-            "$select": "externalCode,code,effectiveStatus,department,jobCode,company,businessUnit,costCenter",
             "$top": "1",
         })
