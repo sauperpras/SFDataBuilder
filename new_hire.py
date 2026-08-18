@@ -19,20 +19,37 @@ from sf_client import SFClient
 # Payload builder
 # ---------------------------------------------------------------------------
 
+_POSITION_ORG_FIELDS = (
+    "company", "businessUnit", "division", "department",
+    "jobCode", "costCenter", "location", "employeeClass",
+    "regularTemporary", "employmentType",
+)
+
+_POSITION_CANDIDATES = [
+    lambda pid: f"FOPosition('{pid}')",
+    lambda pid: f"Position(externalCode='{pid}')",
+    lambda pid: f"Position('{pid}')",
+]
+
+
 def fetch_position_defaults(client, position_id: str) -> dict:
     """
-    Query FOPosition to get org defaults that EmpJob requires (company, businessUnit, etc.).
-    SF does not propagate these automatically via OData — they must be passed explicitly.
+    Query the position entity to get org defaults required by EmpJob.
+    Tries FOPosition, then Position(externalCode=...), then Position(key).
+    Returns an empty dict (with a warning) if none succeed.
     """
-    result = client.get(f"FOPosition('{position_id}')")
-    pos = result.get("d", {})
-    defaults = {}
-    for field in ("company", "businessUnit", "division", "department",
-                  "jobCode", "costCenter", "location", "employeeClass",
-                  "regularTemporary", "employmentType"):
-        if pos.get(field):
-            defaults[field] = pos[field]
-    return defaults
+    for path_fn in _POSITION_CANDIDATES:
+        path = path_fn(position_id)
+        try:
+            result = client.get(path)
+            pos = result.get("d", {})
+            defaults = {f: pos[f] for f in _POSITION_ORG_FIELDS if pos.get(f)}
+            print(f"  Resolved via {path}")
+            return defaults
+        except Exception as e:
+            print(f"  {path} → {e}")
+    print("  WARNING: Could not resolve position defaults — jobInfoNav will have no org fields.")
+    return {}
 
 
 def build_new_hire_payload(person_id: str, user_id: str, start_date: str, position_id: str,
