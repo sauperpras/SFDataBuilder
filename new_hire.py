@@ -43,8 +43,7 @@ def fetch_position_defaults(client, position_id: str) -> dict:
         return {}
 
 
-def build_new_hire_payload(person_id: str, user_id: str, start_date: str, position_id: str,
-                           position_defaults: dict = None) -> dict:
+def build_emp_employment_payload(person_id: str, user_id: str, start_date: str) -> dict:
     epoch = f"/Date({_to_epoch_ms(start_date)})/"
     return {
         "__metadata": {"uri": "EmpEmployment"},
@@ -80,19 +79,20 @@ def build_new_hire_payload(person_id: str, user_id: str, start_date: str, positi
                 ]
             },
         },
-        "jobInfoNav": {
-            "results": [
-                {
-                    "userId": user_id,
-                    "startDate": epoch,
-                    "firstDateWorked": epoch,
-                    "position": position_id,
-                    "seqNumber": "1",
-                    "eventReason": "HIRNEW",
-                    **(position_defaults or {}),
-                }
-            ]
-        },
+    }
+
+
+def build_emp_job_payload(user_id: str, start_date: str, position_id: str,
+                          position_defaults: dict = None) -> dict:
+    epoch = f"/Date({_to_epoch_ms(start_date)})/"
+    return {
+        "__metadata": {"uri": "EmpJob"},
+        "userId": user_id,
+        "startDate": epoch,
+        "position": position_id,
+        "seqNumber": "1",
+        "eventReason": "HIRNEW",
+        **(position_defaults or {}),
     }
 
 
@@ -153,24 +153,31 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True,
         "hireDate": f"/Date({_to_epoch_ms(start_date)})/",
     }
 
-    emp_payload = build_new_hire_payload(person_id, user_id, start_date, position_id, position_defaults)
+    emp_payload = build_emp_employment_payload(person_id, user_id, start_date)
+    job_payload = build_emp_job_payload(user_id, start_date, position_id, position_defaults)
 
-    print("\n[3/5] Step 1 payload — POST User:")
+    print("\n[3/6] Step 1 payload — POST User:")
     print(json.dumps(user_payload, indent=4))
-    print("\n[4/5] Step 2 payload — POST upsert (EmpEmployment deep insert):")
+    print("\n[4/6] Step 2 payload — POST upsert (EmpEmployment + personNav):")
     print(json.dumps(emp_payload, indent=4))
+    print("\n[5/6] Step 3 payload — POST upsert (EmpJob):")
+    print(json.dumps(job_payload, indent=4))
 
     if dry_run:
         print("\n[DRY RUN] Payloads shown above — nothing was sent to SuccessFactors.")
         return
 
-    print("\n[5/5] Step 1: Creating User ...")
+    print("\n[6/6] Step 1: Creating User ...")
     user_result = client.post("User", user_payload)
     print(json.dumps(user_result, indent=4) if user_result else "(204 No Content)")
 
-    print("\n       Step 2: Creating EmpEmployment (deep upsert) ...")
+    print("\n       Step 2: Creating EmpEmployment (with personNav) ...")
     emp_result = client.deep_upsert(emp_payload)
     print(json.dumps(emp_result, indent=4) if emp_result else "(204 No Content)")
+
+    print("\n       Step 3: Creating EmpJob ...")
+    job_result = client.deep_upsert(job_payload)
+    print(json.dumps(job_result, indent=4) if job_result else "(204 No Content)")
 
     print(f"\nNew hire created. personIdExternal={person_id}, userId={user_id}")
 
