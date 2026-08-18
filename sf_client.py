@@ -66,10 +66,10 @@ class SFClient:
             return {}
         return resp.json()
 
-    def deep_upsert(self, payload: dict, purge_type: str = "full") -> dict:
-        """POST to /odata/v2/upsert?purgeType=<purge_type> with a deep-insert payload."""
+    def deep_upsert(self, payload: dict) -> dict:
+        """POST to /odata/v2/upsert with a deep-insert payload."""
         url = f"{self.api_url}/odata/v2/upsert"
-        resp = self.session.post(url, json=payload, params={"purgeType": purge_type})
+        resp = self.session.post(url, json=payload)
         if not resp.ok:
             raise Exception(f"POST upsert → {resp.status_code}: {resp.text}")
         if resp.status_code == 204 or not resp.text.strip():
