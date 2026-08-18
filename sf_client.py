@@ -38,7 +38,8 @@ class SFClient:
     def post(self, entity: str, payload: dict) -> dict:
         url = f"{self.api_url}/odata/v2/{entity}"
         resp = self.session.post(url, json=payload)
-        resp.raise_for_status()
+        if not resp.ok:
+            raise Exception(f"POST {entity} → {resp.status_code}: {resp.text}")
         return resp.json()
 
     def metadata(self) -> str:
