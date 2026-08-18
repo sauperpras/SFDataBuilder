@@ -142,8 +142,8 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
     user_id = _new_user_id(person_id)
     print(f"\n[1/4] Generated personIdExternal={person_id}, userId={user_id}")
 
+    # PerPerson is auto-created by SF when PerPersonal is upserted; do not write it directly.
     payloads = {
-        "PerPerson":      build_per_person(person_id),
         "PerPersonal":    build_per_personal(person_id, start_date),
         "PerEmail":       build_per_email(person_id, start_date),
         "EmpEmployment":  build_emp_employment(person_id, user_id, start_date),
