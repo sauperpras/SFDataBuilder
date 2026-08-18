@@ -19,37 +19,25 @@ from sf_client import SFClient
 # Payload builder
 # ---------------------------------------------------------------------------
 
-_POSITION_ORG_FIELDS = (
-    "company", "businessUnit", "division", "department",
-    "jobCode", "costCenter", "location", "employeeClass",
-    "regularTemporary", "employmentType",
-)
-
-_POSITION_CANDIDATES = [
-    lambda pid: f"FOPosition('{pid}')",
-    lambda pid: f"Position(externalCode='{pid}')",
-    lambda pid: f"Position('{pid}')",
-]
+_POSITION_ORG_FIELDS = ("company", "businessUnit", "division", "department", "location", "jobCode")
 
 
 def fetch_position_defaults(client, position_id: str) -> dict:
     """
-    Query the position entity to get org defaults required by EmpJob.
-    Tries FOPosition, then Position(externalCode=...), then Position(key).
-    Returns an empty dict (with a warning) if none succeed.
+    Query MDF Position by code to get org fields required by EmpJob.
+    Field names map 1:1 from Position to jobInfoNav (company, businessUnit, etc.).
     """
-    for path_fn in _POSITION_CANDIDATES:
-        path = path_fn(position_id)
-        try:
-            result = client.get(path)
-            pos = result.get("d", {})
-            defaults = {f: pos[f] for f in _POSITION_ORG_FIELDS if pos.get(f)}
-            print(f"  Resolved via {path}")
-            return defaults
-        except Exception as e:
-            print(f"  {path} → {e}")
-    print("  WARNING: Could not resolve position defaults — jobInfoNav will have no org fields.")
-    return {}
+    result = client.get("Position", params={
+        "$filter": f"code eq '{position_id}'",
+        "$select": "code,company,businessUnit,division,department,location,jobCode",
+    })
+    rows = result.get("d", {}).get("results", [])
+    if not rows:
+        print(f"  WARNING: No Position found with code={position_id} — jobInfoNav will have no org fields.")
+        return {}
+    pos = rows[0]
+    defaults = {f: pos[f] for f in _POSITION_ORG_FIELDS if pos.get(f)}
+    return defaults
 
 
 def build_new_hire_payload(person_id: str, user_id: str, start_date: str, position_id: str,
