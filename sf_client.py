@@ -49,8 +49,5 @@ class SFClient:
         return resp.text
 
     def check_position(self, position_id: str) -> dict:
-        """Look up a Position record by externalCode."""
-        return self.get("Position", params={
-            "$filter": f"externalCode eq '{position_id}'",
-            "$top": "1",
-        })
+        """Look up a Position record by externalCode (direct key access)."""
+        return self.get(f"Position('{position_id}')")

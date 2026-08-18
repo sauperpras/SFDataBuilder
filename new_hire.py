@@ -121,12 +121,13 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
     # Step 0: validate the position exists
     print(f"\n[1/5] Looking up position {position_id} ...")
     if not dry_run:
-        pos_result = client.check_position(position_id)
-        positions = pos_result.get("d", {}).get("results", [])
-        if not positions:
-            print(f"ERROR: Position '{position_id}' not found in the system.")
+        try:
+            pos_result = client.check_position(position_id)
+            pos = pos_result.get("d", {})
+            print(f"      Found: externalCode={pos.get('externalCode')}")
+        except Exception as e:
+            print(f"ERROR: Position '{position_id}' not found or inaccessible: {e}")
             sys.exit(1)
-        print(f"      Found: {positions[0]}")
     else:
         print("      (dry-run: skipping position lookup)")
 
