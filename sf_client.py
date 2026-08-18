@@ -86,6 +86,7 @@ class SFClient:
             if csrf:
                 inner_headers.append(f"X-CSRF-Token: {csrf}")
 
+            payload = {"__metadata": {"uri": op["entity"]}, **op["payload"]}
             parts += [
                 f"--{batch_id}",
                 f"Content-Type: multipart/mixed; boundary={cs_id}",
@@ -94,10 +95,10 @@ class SFClient:
                 "Content-Type: application/http",
                 "Content-Transfer-Encoding: binary",
                 "",
-                f"POST {op['entity']} HTTP/1.1",
+                "POST upsert HTTP/1.1",
             ] + inner_headers + [
                 "",
-                json.dumps(op["payload"]),
+                json.dumps(payload),
                 "",
                 f"--{cs_id}--",
                 "",
