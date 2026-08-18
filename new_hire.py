@@ -19,7 +19,24 @@ from sf_client import SFClient
 # Payload builder
 # ---------------------------------------------------------------------------
 
-def build_new_hire_payload(person_id: str, user_id: str, start_date: str, position_id: str) -> dict:
+def fetch_position_defaults(client, position_id: str) -> dict:
+    """
+    Query FOPosition to get org defaults that EmpJob requires (company, businessUnit, etc.).
+    SF does not propagate these automatically via OData — they must be passed explicitly.
+    """
+    result = client.get(f"FOPosition('{position_id}')")
+    pos = result.get("d", {})
+    defaults = {}
+    for field in ("company", "businessUnit", "division", "department",
+                  "jobCode", "costCenter", "location", "employeeClass",
+                  "regularTemporary", "employmentType"):
+        if pos.get(field):
+            defaults[field] = pos[field]
+    return defaults
+
+
+def build_new_hire_payload(person_id: str, user_id: str, start_date: str, position_id: str,
+                           position_defaults: dict = None) -> dict:
     epoch = f"/Date({_to_epoch_ms(start_date)})/"
     return {
         "__metadata": {"uri": "EmpEmployment"},
@@ -62,6 +79,7 @@ def build_new_hire_payload(person_id: str, user_id: str, start_date: str, positi
                     "position": position_id,
                     "seqNumber": "1",
                     "eventReason": "HIRNEW",
+                    **(position_defaults or {}),
                 }
             ]
         },
@@ -115,18 +133,22 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
 
     person_id = _next_person_id(client)
     user_id = person_id
-    print(f"\n[1/3] Generated personIdExternal={person_id}, userId={user_id}")
+    print(f"\n[1/4] Generated personIdExternal={person_id}, userId={user_id}")
 
-    payload = build_new_hire_payload(person_id, user_id, start_date, position_id)
+    print(f"\n[2/4] Fetching org defaults from FOPosition({position_id}) ...")
+    position_defaults = fetch_position_defaults(client, position_id)
+    print(f"  Org fields: {json.dumps(position_defaults)}")
 
-    print("\n[2/3] Payload:")
+    payload = build_new_hire_payload(person_id, user_id, start_date, position_id, position_defaults)
+
+    print("\n[3/4] Payload:")
     print(json.dumps(payload, indent=4))
 
     if dry_run:
         print("\n[DRY RUN] Payload shown above — nothing was sent to SuccessFactors.")
         return
 
-    print("\n[3/3] Sending POST to upsert?purgeType=full ...")
+    print("\n[4/4] Sending POST to upsert?purgeType=full ...")
     result = client.deep_upsert(payload)
     print(json.dumps(result, indent=4) if result else "(empty response — likely 204 No Content)")
 
