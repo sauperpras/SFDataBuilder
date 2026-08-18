@@ -42,6 +42,17 @@ class SFClient:
             raise Exception(f"POST {entity} → {resp.status_code}: {resp.text}")
         return resp.json()
 
+    def upsert(self, key_path: str, payload: dict) -> dict:
+        """PUT to a key-based entity URL — creates if absent, updates if present."""
+        url = f"{self.api_url}/odata/v2/{key_path}"
+        resp = self.session.put(url, json=payload)
+        if not resp.ok:
+            raise Exception(f"PUT {key_path} → {resp.status_code}: {resp.text}")
+        # SF returns 204 No Content on success for PUT; return empty dict in that case
+        if resp.status_code == 204 or not resp.text.strip():
+            return {}
+        return resp.json()
+
     def metadata(self) -> str:
         """Fetch raw $metadata XML for entity discovery."""
         url = f"{self.api_url}/odata/v2/$metadata"

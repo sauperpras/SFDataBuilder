@@ -101,6 +101,26 @@ def _to_epoch_ms(date_str: str) -> int:
     return int((d - epoch).total_seconds() * 1000)
 
 
+def _sf_datetime(date_str: str) -> str:
+    """Convert YYYY-MM-DD to SF OData key datetime literal: datetime'YYYY-MM-DDTHH:MM:SS'."""
+    return f"datetime'{date_str}T00:00:00'"
+
+
+def _entity_key(entity: str, payload: dict, start_date: str) -> str:
+    """Return the OData key path for upsert PUT (e.g. PerPerson('id'))."""
+    pid = payload.get("personIdExternal", "")
+    uid = payload.get("userId", "")
+    dt  = _sf_datetime(start_date)
+    keys = {
+        "PerPerson":     f"PerPerson('{pid}')",
+        "PerPersonal":   f"PerPersonal(personIdExternal='{pid}',startDate={dt})",
+        "PerEmail":      f"PerEmail(personIdExternal='{pid}',startDate={dt},emailType='{payload.get('emailType', '')}')",
+        "EmpEmployment": f"EmpEmployment(personIdExternal='{pid}',userId='{uid}')",
+        "EmpJob":        f"EmpJob(seqNumber=1L,startDate={dt},userId='{uid}')",
+    }
+    return keys[entity]
+
+
 def _new_person_id() -> str:
     """Generate a unique external person ID. Replace with your ID scheme."""
     return f"NH-{uuid.uuid4().hex[:8].upper()}"
@@ -137,12 +157,14 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
         print("\n[DRY RUN] Payloads shown above — nothing was sent to SuccessFactors.")
         return
 
-    # Post in order (PerPerson must exist before PerPersonal/EmpEmployment)
-    print("\n[3/4] Posting entities ...")
+    # Upsert in order (PerPerson must exist before PerPersonal/EmpEmployment)
+    print("\n[3/4] Upserting entities ...")
     for entity, payload in payloads.items():
-        print(f"  POST {entity} ...", end=" ")
-        result = client.post(entity, payload)
-        print(f"OK  →  {result.get('d', {}).get('personIdExternal') or result.get('d', {}).get('userId', '')}")
+        key_path = _entity_key(entity, payload, start_date)
+        print(f"  PUT {key_path} ...", end=" ")
+        result = client.upsert(key_path, payload)
+        ref = result.get('d', {}).get('personIdExternal') or result.get('d', {}).get('userId', '') or "(204 No Content)"
+        print(f"OK  →  {ref}")
 
     print(f"\n[4/4] New hire created. personIdExternal={person_id}, userId={user_id}")
 
