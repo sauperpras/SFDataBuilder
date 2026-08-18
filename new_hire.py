@@ -184,8 +184,8 @@ def main():
     parser.add_argument("--cost-center",    help="Cost center code")
     parser.add_argument("--location",       help="Location code")
     parser.add_argument("--employee-class",  help="Employee class picklist ID")
-    parser.add_argument("--pay-scale-type",  default="US1", help="Pay scale type code (default: US1)")
-    parser.add_argument("--pay-scale-area",  default="US2", help="Pay scale area code (default: US2)")
+    parser.add_argument("--pay-scale-type",  required=True, help="Pay scale type code (e.g. USA/US1)")
+    parser.add_argument("--pay-scale-area",  required=True, help="Pay scale area code (e.g. USA/US2)")
     parser.add_argument("--dry-run", action="store_true", default=True,
                         help="Print payload without calling the API (default: True)")
     parser.add_argument("--live", action="store_true",
