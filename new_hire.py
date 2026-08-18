@@ -88,12 +88,6 @@ def build_new_hire_payload(person_id: str, user_id: str, start_date: str, positi
                 }
             ]
         },
-        "userNav": {
-            "userId": user_id,
-            "username": user_id,
-            "status": "Active",
-            "hireDate": epoch,
-        },
     }
 
 
@@ -147,18 +141,31 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True,
         position_defaults.update(overrides)
     print(f"  Org fields: {json.dumps(position_defaults)}")
 
-    payload = build_new_hire_payload(person_id, user_id, start_date, position_id, position_defaults)
+    user_payload = {
+        "userId": user_id,
+        "username": user_id,
+        "status": "Active",
+        "hireDate": f"/Date({_to_epoch_ms(start_date)})/",
+    }
 
-    print("\n[3/4] Payload:")
-    print(json.dumps(payload, indent=4))
+    emp_payload = build_new_hire_payload(person_id, user_id, start_date, position_id, position_defaults)
+
+    print("\n[3/5] Step 1 payload — POST User:")
+    print(json.dumps(user_payload, indent=4))
+    print("\n[4/5] Step 2 payload — POST upsert (EmpEmployment deep insert):")
+    print(json.dumps(emp_payload, indent=4))
 
     if dry_run:
-        print("\n[DRY RUN] Payload shown above — nothing was sent to SuccessFactors.")
+        print("\n[DRY RUN] Payloads shown above — nothing was sent to SuccessFactors.")
         return
 
-    print("\n[4/4] Sending POST to upsert?purgeType=full ...")
-    result = client.deep_upsert(payload)
-    print(json.dumps(result, indent=4) if result else "(empty response — likely 204 No Content)")
+    print("\n[5/5] Step 1: Creating User ...")
+    user_result = client.post("User", user_payload)
+    print(json.dumps(user_result, indent=4) if user_result else "(204 No Content)")
+
+    print("\n       Step 2: Creating EmpEmployment (deep upsert) ...")
+    emp_result = client.deep_upsert(emp_payload)
+    print(json.dumps(emp_result, indent=4) if emp_result else "(204 No Content)")
 
     print(f"\nNew hire created. personIdExternal={person_id}, userId={user_id}")
 
