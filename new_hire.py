@@ -26,7 +26,7 @@ def build_per_person(person_id: str) -> dict:
     return {
         "personIdExternal": person_id,
         "dateOfBirth": "/Date(0)/",     # placeholder — update with real DOB
-        "countryOfBirth": "US",         # placeholder
+        "countryOfBirth": "USA",        # 3-letter ISO code as used in this instance
     }
 
 
@@ -51,13 +51,20 @@ def build_per_email(person_id: str, start_date: str) -> dict:
 
 
 def build_emp_employment(person_id: str, user_id: str, start_date: str) -> dict:
+    epoch = f"/Date({_to_epoch_ms(start_date)})/"
     return {
         "personIdExternal": person_id,
         "userId": user_id,
-        "startDate": f"/Date({_to_epoch_ms(start_date)})/",
-        "originalStartDate": f"/Date({_to_epoch_ms(start_date)})/",
-        "seniorityDate": f"/Date({_to_epoch_ms(start_date)})/",
-        "employmentType": "Employee",   # verify with your instance picklist
+        "assignmentIdExternal": person_id,
+        "assignmentClass": "ST",
+        "isContingentWorker": False,
+        "isECRecord": True,
+        "startDate": epoch,
+        "originalStartDate": epoch,
+        "seniorityDate": epoch,
+        "serviceDate": epoch,
+        "firstDateWorked": epoch,
+        "benefitsEligibilityStartDate": epoch,
     }
 
 
@@ -66,15 +73,20 @@ def build_emp_job(user_id: str, start_date: str, position_id: str) -> dict:
         "userId": user_id,
         "startDate": f"/Date({_to_epoch_ms(start_date)})/",
         "position": position_id,
-        "seqNumber": 1,
-        "emplStatus": "A",              # Active — verify picklist value
-        "employeeType": "Regular",      # verify with your instance
+        "seqNumber": "1",
+        "emplStatus": "4595",           # Active picklist ID — verify with your instance
+        "eventReason": "HIRNEW",        # New hire event reason
         # Fields below are typically derived from Position in SF EC;
         # leaving them commented so SF can default them from the position.
         # "company": "...",
+        # "businessUnit": "...",
+        # "division": "...",
         # "department": "...",
         # "jobCode": "...",
         # "costCenter": "...",
+        # "location": "...",
+        # "employeeClass": "...",       # picklist ID
+        # "employmentType": "...",      # picklist ID
     }
 
 
