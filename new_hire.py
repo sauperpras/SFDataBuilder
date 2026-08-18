@@ -19,8 +19,7 @@ from sf_client import SFClient
 # Payload builder
 # ---------------------------------------------------------------------------
 
-_POSITION_ORG_FIELDS = ("company", "businessUnit", "division", "department", "location", "jobCode",
-                        "payScaleType", "payScaleArea")
+_POSITION_ORG_FIELDS = ("company", "businessUnit", "division", "department", "location", "jobCode")
 
 
 def fetch_position_defaults(client, position_id: str) -> dict:
@@ -31,7 +30,7 @@ def fetch_position_defaults(client, position_id: str) -> dict:
     try:
         result = client.get("Position", params={
             "$filter": f"code eq '{position_id}'",
-            "$select": "code,company,businessUnit,division,department,location,jobCode,payScaleType,payScaleArea",
+            "$select": "code,company,businessUnit,division,department,location,jobCode",
         })
         rows = result.get("d", {}).get("results", [])
         if not rows:
