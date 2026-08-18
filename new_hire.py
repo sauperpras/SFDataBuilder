@@ -61,7 +61,6 @@ def build_new_hire_payload(person_id: str, user_id: str, start_date: str, positi
                     "startDate": epoch,
                     "position": position_id,
                     "seqNumber": "1",
-                    "emplStatus": "4595",               # Active picklist ID — verify with your instance
                     "eventReason": "HIRNEW",
                 }
             ]
