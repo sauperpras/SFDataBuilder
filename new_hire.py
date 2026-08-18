@@ -20,11 +20,12 @@ from sf_client import SFClient
 # Payload builders
 # ---------------------------------------------------------------------------
 
-def build_user(user_id: str) -> dict:
+def build_user(user_id: str, start_date: str) -> dict:
     return {
         "userId": user_id,
         "username": user_id,
         "status": "Active",
+        "hireDate": f"/Date({_to_epoch_ms(start_date)})/",
     }
 
 
@@ -125,14 +126,14 @@ def create_new_hire(start_date: str, position_id: str, dry_run: bool = True):
     user_id = _new_user_id(person_id)
     print(f"\n[1/3] Generated personIdExternal={person_id}, userId={user_id}")
 
-    # PerPerson is not insertable; User creation auto-creates it.
-    # Order: User → EmpEmployment → EmpJob → PerPersonal → PerEmail
+    # PerPerson and EmpEmployment are not directly insertable in this tenant.
+    # Step 1: create User + personal data.
+    # Step 2: create employment via EmpJob with eventReason to trigger the hire event.
     operations = [
-        {"entity": "User",          "payload": build_user(user_id)},
-        {"entity": "EmpEmployment", "payload": build_emp_employment(person_id, user_id, start_date)},
-        {"entity": "EmpJob",        "payload": build_emp_job(user_id, start_date, position_id)},
-        {"entity": "PerPersonal",   "payload": build_per_personal(person_id, start_date)},
-        {"entity": "PerEmail",      "payload": build_per_email(person_id, start_date)},
+        {"entity": "User",        "payload": build_user(user_id, start_date)},
+        {"entity": "PerPersonal", "payload": build_per_personal(person_id, start_date)},
+        {"entity": "PerEmail",    "payload": build_per_email(person_id, start_date)},
+        {"entity": "EmpJob",      "payload": build_emp_job(user_id, start_date, position_id)},
     ]
 
     print("\n[2/3] Batch operations:")
