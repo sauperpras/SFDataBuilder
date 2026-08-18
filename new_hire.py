@@ -85,6 +85,7 @@ def build_new_hire_payload(person_id: str, user_id: str, start_date: str, positi
                 {
                     "userId": user_id,
                     "startDate": epoch,
+                    "firstDateWorked": epoch,
                     "position": position_id,
                     "seqNumber": "1",
                     "eventReason": "HIRNEW",
