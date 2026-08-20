@@ -146,7 +146,11 @@ class MetadataEngine:
 class PicklistResolver:
     def __init__(self, client: SFClient, cache_file: str = ".sf_picklists.json"):
         self.client = client
-        self.cache_file = Path(cache_file)
+        p = Path(cache_file)
+        if not p.is_absolute():
+            base_dir = Path(__file__).resolve().parent
+            p = base_dir / cache_file
+        self.cache_file = p
         self._cache: Dict[str, List[Dict[str, Any]]] = self._load_cache()
 
     def _load_cache(self) -> Dict[str, List[Dict[str, Any]]]:

@@ -2,9 +2,13 @@
 SAP SuccessFactors Model Context Protocol (MCP) Server.
 Exposes metadata-driven tools for employee onboarding, position management,
 picklist resolution, and generic OData operations.
+
+Designed with lazy initialization and stderr logging so it runs seamlessly
+across any working directory and MCP client (Antigravity, Claude Desktop, Cursor).
 """
 
 import json
+import sys
 from typing import Any, Dict, Optional
 from mcp.server import MCPServer
 
@@ -16,12 +20,27 @@ from hire_service import HireService
 
 mcp = MCPServer("sap-successfactors")
 
-# Initialize core services
-_client = SFClient()
-_meta_engine = MetadataEngine(_client)
-_picklists = PicklistResolver(_client)
-_pos_service = PositionService(_client)
-_hire_service = HireService(_client)
+# Lazy singleton container
+_services = None
+
+
+def _get_services():
+    """Lazily initialize services on first tool call to ensure instant startup."""
+    global _services
+    if _services is None:
+        client = SFClient()
+        meta_engine = MetadataEngine(client)
+        picklists = PicklistResolver(client)
+        pos_service = PositionService(client)
+        hire_service = HireService(client)
+        _services = {
+            "client": client,
+            "meta_engine": meta_engine,
+            "picklists": picklists,
+            "pos_service": pos_service,
+            "hire_service": hire_service,
+        }
+    return _services
 
 
 @mcp.tool()
@@ -39,9 +58,11 @@ def sf_hire_employee(inputs: Dict[str, Any], dry_run: bool = False) -> str:
         dry_run: If True, returns the generated validation plan without writing to SF.
     """
     try:
-        res = _hire_service.hire_employee(inputs, dry_run=dry_run)
+        svc = _get_services()["hire_service"]
+        res = svc.hire_employee(inputs, dry_run=dry_run)
         return json.dumps(res, indent=2)
     except Exception as e:
+        print(f"[Error in sf_hire_employee] {e}", file=sys.stderr)
         return json.dumps({"status": "ERROR", "message": str(e)}, indent=2)
 
 
@@ -62,7 +83,8 @@ def sf_clone_position(
         overrides: Optional dictionary of attributes to override on the cloned position.
     """
     try:
-        res = _pos_service.clone_position(
+        svc = _get_services()["pos_service"]
+        res = svc.clone_position(
             source_code=source_code,
             target_code=target_code,
             title_suffix=title_suffix,
@@ -70,6 +92,7 @@ def sf_clone_position(
         )
         return json.dumps(res, indent=2)
     except Exception as e:
+        print(f"[Error in sf_clone_position] {e}", file=sys.stderr)
         return json.dumps({"status": "ERROR", "message": str(e)}, indent=2)
 
 
@@ -82,12 +105,14 @@ def sf_get_position(position_code: str) -> str:
         position_code: External code of the position (e.g. '3000803').
     """
     try:
-        pos = _pos_service.get_position(position_code)
+        svc = _get_services()["pos_service"]
+        pos = svc.get_position(position_code)
         if not pos:
             return json.dumps({"status": "NOT_FOUND", "message": f"Position '{position_code}' not found."}, indent=2)
         clean = {k: v for k, v in pos.items() if not isinstance(v, dict)}
         return json.dumps(clean, indent=2)
     except Exception as e:
+        print(f"[Error in sf_get_position] {e}", file=sys.stderr)
         return json.dumps({"status": "ERROR", "message": str(e)}, indent=2)
 
 
@@ -101,13 +126,15 @@ def sf_list_positions(limit: int = 10, filter_query: Optional[str] = None) -> st
         filter_query: OData $filter string (e.g. "company eq '1710' and vacant eq true").
     """
     try:
-        positions = _pos_service.list_positions(top=limit, filter_query=filter_query)
+        svc = _get_services()["pos_service"]
+        positions = svc.list_positions(top=limit, filter_query=filter_query)
         clean = [
             {k: v for k, v in p.items() if not isinstance(v, dict)}
             for p in positions
         ]
         return json.dumps(clean, indent=2)
     except Exception as e:
+        print(f"[Error in sf_list_positions] {e}", file=sys.stderr)
         return json.dumps({"status": "ERROR", "message": str(e)}, indent=2)
 
 
@@ -121,9 +148,11 @@ def sf_search_picklist(picklist_id: str, query: str = "") -> str:
         query: Optional search term to filter options by label or ID.
     """
     try:
-        opts = _picklists.search(picklist_id, query)
+        svc = _get_services()["picklists"]
+        opts = svc.search(picklist_id, query)
         return json.dumps(opts, indent=2)
     except Exception as e:
+        print(f"[Error in sf_search_picklist] {e}", file=sys.stderr)
         return json.dumps({"status": "ERROR", "message": str(e)}, indent=2)
 
 
@@ -136,7 +165,8 @@ def sf_get_schema(entity_name: str) -> str:
         entity_name: Entity name (e.g. 'User', 'PerPersonal', 'EmpJob', 'EmpEmployment', 'Position').
     """
     try:
-        schema = _meta_engine.get_schema(entity_name)
+        svc = _get_services()["meta_engine"]
+        schema = svc.get_schema(entity_name)
         if not schema:
             return json.dumps({"status": "NOT_FOUND", "message": f"Entity '{entity_name}' not found in metadata."}, indent=2)
         
@@ -160,6 +190,7 @@ def sf_get_schema(entity_name: str) -> str:
             ]
         }, indent=2)
     except Exception as e:
+        print(f"[Error in sf_get_schema] {e}", file=sys.stderr)
         return json.dumps({"status": "ERROR", "message": str(e)}, indent=2)
 
 
@@ -182,6 +213,7 @@ def sf_query(
         expand: Navigation properties for $expand.
     """
     try:
+        client = _get_services()["client"]
         params = {"$top": str(top)}
         if filter:
             params["$filter"] = filter
@@ -190,7 +222,7 @@ def sf_query(
         if expand:
             params["$expand"] = expand
 
-        res = _client.get(entity, params=params)
+        res = client.get(entity, params=params)
         records = res.get("d", {}).get("results", [])
         if not records and "d" in res and not isinstance(res["d"], list):
             records = [res["d"]]
@@ -201,6 +233,7 @@ def sf_query(
         ]
         return json.dumps(clean, indent=2)
     except Exception as e:
+        print(f"[Error in sf_query] {e}", file=sys.stderr)
         return json.dumps({"status": "ERROR", "message": str(e)}, indent=2)
 
 
@@ -214,12 +247,17 @@ def sf_upsert_entity(entity: str, payload: Dict[str, Any]) -> str:
         payload: Entity payload dictionary.
     """
     try:
+        services = _get_services()
+        meta_engine = services["meta_engine"]
+        client = services["client"]
+
         if "__metadata" not in payload:
             payload["__metadata"] = {"uri": entity}
-        validated = _meta_engine.validate_payload(entity, payload)
-        res = _client.deep_upsert(validated)
+        validated = meta_engine.validate_payload(entity, payload)
+        res = client.deep_upsert(validated)
         return json.dumps(res, indent=2)
     except Exception as e:
+        print(f"[Error in sf_upsert_entity] {e}", file=sys.stderr)
         return json.dumps({"status": "ERROR", "message": str(e)}, indent=2)
 
 

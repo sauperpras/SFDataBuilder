@@ -1,25 +1,43 @@
 """
 Thin HTTP client for SAP SuccessFactors OData v2.
 Supports configuration via config.local.json, .env, or environment variables.
+Robust path resolution to ensure it works from any working directory (CWD).
 """
 
 import json
 import os
+import sys
 import uuid
 from pathlib import Path
+from typing import Optional
 import requests
 from requests.auth import HTTPBasicAuth
 
 
-def _load_config(path: str = "config.local.json") -> dict:
+def _load_config(path: Optional[str] = None) -> dict:
     config = {}
-    config_file = Path(path)
-    if config_file.exists():
-        try:
-            with open(config_file) as f:
-                config = json.load(f)
-        except Exception as e:
-            print(f"Warning: could not parse {path}: {e}")
+
+    # Build search candidates for config.local.json
+    candidates = []
+    if path:
+        candidates.append(Path(path))
+    if os.getenv("SF_CONFIG_PATH"):
+        candidates.append(Path(os.getenv("SF_CONFIG_PATH")))
+
+    # Directory where this file is located
+    base_dir = Path(__file__).resolve().parent
+    candidates.append(base_dir / "config.local.json")
+    candidates.append(Path.cwd() / "config.local.json")
+    candidates.append(Path.home() / ".sf_config.json")
+
+    for config_file in candidates:
+        if config_file.is_file():
+            try:
+                with open(config_file, encoding="utf-8") as f:
+                    config = json.load(f)
+                    break
+            except Exception as e:
+                print(f"[Warning] could not parse {config_file}: {e}", file=sys.stderr)
 
     # Fallback to environment variables
     api_url = os.getenv("SF_API_URL", config.get("SF_API_URL", ""))
@@ -27,9 +45,10 @@ def _load_config(path: str = "config.local.json") -> dict:
     password = os.getenv("SF_PASSWORD", config.get("SF_PASSWORD", ""))
 
     if not api_url or not username or not password:
+        searched = ", ".join(str(c) for c in candidates)
         raise ValueError(
-            "Missing SF credentials. Provide SF_API_URL, SF_USERNAME, SF_PASSWORD "
-            f"via environment variables or {path}."
+            "Missing SuccessFactors credentials. Set SF_API_URL, SF_USERNAME, SF_PASSWORD "
+            f"via environment variables or in config.local.json (Searched locations: {searched})"
         )
 
     return {
@@ -40,7 +59,7 @@ def _load_config(path: str = "config.local.json") -> dict:
 
 
 class SFClient:
-    def __init__(self, config_path: str = "config.local.json"):
+    def __init__(self, config_path: Optional[str] = None):
         cfg = _load_config(config_path)
         self.api_url = cfg["SF_API_URL"].rstrip("/")
         username = cfg["SF_USERNAME"]
@@ -129,10 +148,14 @@ class SFClient:
         return data
 
     def metadata(self, use_cache: bool = True) -> str:
-        """Fetch raw $metadata XML with disk caching support."""
-        cache_path = Path(".sf_metadata.xml")
+        """Fetch raw $metadata XML with absolute disk caching support."""
+        base_dir = Path(__file__).resolve().parent
+        cache_path = base_dir / ".sf_metadata.xml"
         if use_cache and cache_path.exists():
-            return cache_path.read_text(encoding="utf-8")
+            try:
+                return cache_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
 
         url = f"{self.api_url}/odata/v2/$metadata"
         resp = self.session.get(url, headers={"Accept": "application/xml"})
