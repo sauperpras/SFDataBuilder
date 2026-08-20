@@ -56,6 +56,28 @@ class SFClient:
             raise Exception(f"POST {entity} → {resp.status_code}: {resp.text}")
         return resp.json()
 
+    def _check_upsert_response(self, data: dict, operation_name: str = "upsert"):
+        """Recursively check for 'ERROR' status in upsert response and raise Exception if found."""
+        def extract_errors(item):
+            errors = []
+            if isinstance(item, dict):
+                if item.get("status") == "ERROR":
+                    msg = item.get("message")
+                    if msg:
+                        errors.append(msg)
+                for inline in item.get("inlineResults", []) or []:
+                    for sub in inline.get("results", []) or []:
+                        errors.extend(extract_errors(sub))
+            elif isinstance(item, list):
+                for sub in item:
+                    errors.extend(extract_errors(sub))
+            return errors
+
+        if isinstance(data, dict) and "d" in data:
+            errs = extract_errors(data["d"])
+            if errs:
+                raise Exception(f"{operation_name} failed with error(s):\n" + "\n".join(f"  - {e}" for e in errs))
+
     def upsert(self, key_path: str, payload: dict) -> dict:
         """PUT to a key-based entity URL — creates if absent, updates if present."""
         url = f"{self.api_url}/odata/v2/{key_path}"
@@ -64,7 +86,9 @@ class SFClient:
             raise Exception(f"PUT {key_path} → {resp.status_code}: {resp.text}")
         if resp.status_code == 204 or not resp.text.strip():
             return {}
-        return resp.json()
+        data = resp.json()
+        self._check_upsert_response(data, operation_name=f"PUT {key_path}")
+        return data
 
     def deep_upsert(self, payload: dict) -> dict:
         """POST to /odata/v2/upsert with a deep-insert payload."""
@@ -74,7 +98,10 @@ class SFClient:
             raise Exception(f"POST upsert → {resp.status_code}: {resp.text}")
         if resp.status_code == 204 or not resp.text.strip():
             return {}
-        return resp.json()
+        data = resp.json()
+        entity_name = payload.get("__metadata", {}).get("uri", "Entity")
+        self._check_upsert_response(data, operation_name=f"Upsert {entity_name}")
+        return data
 
     def batch(self, operations: list, print_request: bool = False) -> str:
         """
