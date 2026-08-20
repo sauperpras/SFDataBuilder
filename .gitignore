@@ -1,4 +1,7 @@
 config.local.json
+.env
+.sf_metadata.xml
+.sf_picklists.json
 __pycache__/
 *.pyc
 *.pyo

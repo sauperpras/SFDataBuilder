@@ -1,26 +1,49 @@
 """
 Thin HTTP client for SAP SuccessFactors OData v2.
-Uses HTTP Basic Auth (username@company:password).
+Supports configuration via config.local.json, .env, or environment variables.
 """
 
 import json
 import os
 import uuid
+from pathlib import Path
 import requests
 from requests.auth import HTTPBasicAuth
 
 
 def _load_config(path: str = "config.local.json") -> dict:
-    with open(path) as f:
-        return json.load(f)
+    config = {}
+    config_file = Path(path)
+    if config_file.exists():
+        try:
+            with open(config_file) as f:
+                config = json.load(f)
+        except Exception as e:
+            print(f"Warning: could not parse {path}: {e}")
+
+    # Fallback to environment variables
+    api_url = os.getenv("SF_API_URL", config.get("SF_API_URL", ""))
+    username = os.getenv("SF_USERNAME", config.get("SF_USERNAME", ""))
+    password = os.getenv("SF_PASSWORD", config.get("SF_PASSWORD", ""))
+
+    if not api_url or not username or not password:
+        raise ValueError(
+            "Missing SF credentials. Provide SF_API_URL, SF_USERNAME, SF_PASSWORD "
+            f"via environment variables or {path}."
+        )
+
+    return {
+        "SF_API_URL": api_url,
+        "SF_USERNAME": username,
+        "SF_PASSWORD": password,
+    }
 
 
 class SFClient:
     def __init__(self, config_path: str = "config.local.json"):
         cfg = _load_config(config_path)
         self.api_url = cfg["SF_API_URL"].rstrip("/")
-        # SF Basic Auth format: username@company:password
-        username = f"{cfg['SF_USERNAME']}"
+        username = cfg["SF_USERNAME"]
         password = cfg["SF_PASSWORD"]
         self.auth = HTTPBasicAuth(username, password)
         self.session = requests.Session()
@@ -41,7 +64,7 @@ class SFClient:
             if token:
                 self.session.headers["X-CSRF-Token"] = token
         except Exception:
-            pass  # token unavailable; proceed without it
+            pass
 
     def get(self, entity: str, params: dict = None) -> dict:
         url = f"{self.api_url}/odata/v2/{entity}"
@@ -53,7 +76,9 @@ class SFClient:
         url = f"{self.api_url}/odata/v2/{entity}"
         resp = self.session.post(url, json=payload)
         if not resp.ok:
-            raise Exception(f"POST {entity} → {resp.status_code}: {resp.text}")
+            raise Exception(f"POST {entity} -> {resp.status_code}: {resp.text}")
+        if resp.status_code == 204 or not resp.text.strip():
+            return {}
         return resp.json()
 
     def _check_upsert_response(self, data: dict, operation_name: str = "upsert"):
@@ -83,19 +108,19 @@ class SFClient:
         url = f"{self.api_url}/odata/v2/{key_path}"
         resp = self.session.put(url, json=payload)
         if not resp.ok:
-            raise Exception(f"PUT {key_path} → {resp.status_code}: {resp.text}")
+            raise Exception(f"PUT {key_path} -> {resp.status_code}: {resp.text}")
         if resp.status_code == 204 or not resp.text.strip():
             return {}
         data = resp.json()
         self._check_upsert_response(data, operation_name=f"PUT {key_path}")
         return data
 
-    def deep_upsert(self, payload: dict) -> dict:
+    def deep_upsert(self, payload: dict, params: dict = None) -> dict:
         """POST to /odata/v2/upsert with a deep-insert payload."""
         url = f"{self.api_url}/odata/v2/upsert"
-        resp = self.session.post(url, json=payload)
+        resp = self.session.post(url, json=payload, params=params)
         if not resp.ok:
-            raise Exception(f"POST upsert → {resp.status_code}: {resp.text}")
+            raise Exception(f"POST upsert -> {resp.status_code}: {resp.text}")
         if resp.status_code == 204 or not resp.text.strip():
             return {}
         data = resp.json()
@@ -103,75 +128,18 @@ class SFClient:
         self._check_upsert_response(data, operation_name=f"Upsert {entity_name}")
         return data
 
-    def batch(self, operations: list, print_request: bool = False) -> str:
-        """
-        Execute multiple POST operations in a single OData $batch request.
-        All operations share one changeset so they execute as a single transaction.
-        Each operation: {"entity": "EntityName", "payload": {...}}
-        Returns the raw multipart response text.
-        """
-        batch_id = f"batch_create_employee_{uuid.uuid4().hex[:8]}"
-        cs_id = "changeset_single_transaction"
-        csrf = self.session.headers.get("X-CSRF-Token", "")
+    def metadata(self, use_cache: bool = True) -> str:
+        """Fetch raw $metadata XML with disk caching support."""
+        cache_path = Path(".sf_metadata.xml")
+        if use_cache and cache_path.exists():
+            return cache_path.read_text(encoding="utf-8")
 
-        inner_headers = [
-            "Content-Type: application/json",
-            "successfactors-sourcetype: odata",
-        ]
-        if csrf:
-            inner_headers.append(f"X-CSRF-Token: {csrf}")
-
-        parts = [
-            f"--{batch_id}",
-            f"Content-Type: multipart/mixed; boundary={cs_id}",
-            "",
-        ]
-
-        for op in operations:
-            payload = {"__metadata": {"uri": op["entity"]}, **op["payload"]}
-            parts += [
-                f"--{cs_id}",
-                "Content-Type: application/http",
-                "Content-Transfer-Encoding: binary",
-                "",
-                f"POST {op['entity']} HTTP/1.1",
-            ] + inner_headers + [
-                "",
-                json.dumps(payload),
-                "",
-            ]
-
-        parts += [
-            f"--{cs_id}--",
-            "",
-            f"--{batch_id}--",
-            "",
-        ]
-
-        body = "\r\n".join(parts)
-
-        if print_request:
-            print("\n--- BATCH REQUEST BODY ---")
-            print(body)
-            print("--- END BATCH REQUEST BODY ---\n")
-
-        url = f"{self.api_url}/odata/v2/$batch"
-        resp = self.session.post(
-            url,
-            data=body.encode("utf-8"),
-            headers={"Content-Type": f"multipart/mixed; boundary={batch_id}"},
-        )
-        if not resp.ok:
-            raise Exception(f"$batch → {resp.status_code}: {resp.text}")
-        return resp.text
-
-    def metadata(self) -> str:
-        """Fetch raw $metadata XML for entity discovery."""
         url = f"{self.api_url}/odata/v2/$metadata"
         resp = self.session.get(url, headers={"Accept": "application/xml"})
         resp.raise_for_status()
-        return resp.text
-
-    def check_position(self, position_id: str) -> dict:
-        """Look up a Position record by externalCode (direct key access)."""
-        return self.get(f"Position('{position_id}')")
+        xml_text = resp.text
+        try:
+            cache_path.write_text(xml_text, encoding="utf-8")
+        except Exception:
+            pass
+        return xml_text
