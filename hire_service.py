@@ -73,6 +73,20 @@ class HireService:
         except Exception as e:
             raise Exception(f"Step 4 (PerEmail) failed: {e}")
 
+        # Step 4a: PerPhone
+        try:
+            self.client.deep_upsert(payloads["PerPhone"])
+            result["steps"]["PerPhone"] = "UPSERTED"
+        except Exception as e:
+            raise Exception(f"Step 4a (PerPhone) failed: {e}")
+
+        # Step 4b: PerAddressDEFLT
+        try:
+            self.client.deep_upsert(payloads["PerAddressDEFLT"])
+            result["steps"]["PerAddressDEFLT"] = "UPSERTED"
+        except Exception as e:
+            raise Exception(f"Step 4b (PerAddressDEFLT) failed: {e}")
+
         # Step 5: EmpEmployment
         try:
             self.client.deep_upsert(payloads["EmpEmployment"])

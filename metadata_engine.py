@@ -1,20 +1,46 @@
 """
 Metadata Engine & Dynamic Picklist Resolver for SAP SuccessFactors OData v2.
-Parses $metadata EDM XML, discovers schemas, validates payloads pre-flight,
-and resolves human-readable values to exact picklist option IDs with caching.
+Parses $metadata EDM XML with full SAP SuccessFactors annotations, discovers schemas,
+enforces strict contract-first pre-flight validation, and resolves dynamic picklists.
 """
 
 import json
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from sf_client import SFClient
 
 
 EDM_NS = "{http://schemas.microsoft.com/ado/2008/09/edm}"
-SAP_NS = "{http://www.sap.com/Protocols/SAPData}"
+SF_SAP_NS = "{http://www.successfactors.com/edm/sap}"
+SAP_STD_NS = "{http://www.sap.com/Protocols/SAPData}"
+
+
+def _get_sap_attr(element: ET.Element, attr_name: str, default: Optional[str] = None) -> Optional[str]:
+    """Helper to retrieve SAP metadata attribute regardless of namespace variant."""
+    for ns in [SF_SAP_NS, SAP_STD_NS]:
+        val = element.attrib.get(f"{ns}{attr_name}")
+        if val is not None:
+            return val
+    return element.attrib.get(attr_name, default)
+
+
+def _to_epoch_ms(date_str: str) -> int:
+    """Convert YYYY-MM-DD to milliseconds since epoch (SF OData /Date(...)/ format)."""
+    d = date.fromisoformat(str(date_str).split("T")[0])
+    epoch = date(1970, 1, 1)
+    return int((d - epoch).total_seconds() * 1000)
+
+
+def _format_date(date_str: str) -> str:
+    """Format date string to SF /Date(ms)/."""
+    if str(date_str).startswith("/Date(") and str(date_str).endswith(")/"):
+        return str(date_str)
+    return f"/Date({_to_epoch_ms(str(date_str))})/"
 
 
 @dataclass
@@ -22,10 +48,20 @@ class EntityProperty:
     name: str
     type: str
     nullable: bool = True
+    required: bool = False
     creatable: bool = True
     updatable: bool = True
+    upsertable: bool = True
+    visible: bool = True
     max_length: Optional[int] = None
+    picklist_id: Optional[str] = None
+    display_format: Optional[str] = None
     label: Optional[str] = None
+
+    @property
+    def is_writable(self) -> bool:
+        """True if field can be written to via POST or Upsert."""
+        return self.upsertable or self.creatable or self.updatable
 
 
 @dataclass
@@ -43,9 +79,17 @@ class EntitySchema:
     nav_properties: Dict[str, NavigationProperty] = field(default_factory=dict)
     key_properties: List[str] = field(default_factory=list)
 
-    def is_creatable(self, prop_name: str) -> bool:
+    def get_required_properties(self) -> List[str]:
+        """List of property names that are strictly required by SuccessFactors."""
+        return [p.name for p in self.properties.values() if p.required]
+
+    def get_writable_properties(self) -> List[str]:
+        """List of property names that can be sent in upsert/create payloads."""
+        return [p.name for p in self.properties.values() if p.is_writable]
+
+    def is_writable(self, prop_name: str) -> bool:
         prop = self.properties.get(prop_name)
-        return prop.creatable if prop else False
+        return prop.is_writable if prop else True
 
 
 class MetadataEngine:
@@ -55,7 +99,7 @@ class MetadataEngine:
         self._load_metadata()
 
     def _load_metadata(self):
-        """Parse OData v2 EDM XML and build entity schemas."""
+        """Parse OData v2 EDM XML with full SuccessFactors annotations."""
         xml_content = self.client.metadata()
         root = ET.fromstring(xml_content)
 
@@ -66,34 +110,49 @@ class MetadataEngine:
 
             schema = EntitySchema(name=name)
 
-            # Keys
+            # 1. Primary Keys
             key_elem = et.find(f"{EDM_NS}Key")
             if key_elem is not None:
                 for prop_ref in key_elem.findall(f"{EDM_NS}PropertyRef"):
                     schema.key_properties.append(prop_ref.attrib.get("Name", ""))
 
-            # Properties
+            # 2. Properties & SAP Annotations
             for prop in et.findall(f"{EDM_NS}Property"):
                 pname = prop.attrib.get("Name", "")
                 ptype = prop.attrib.get("Type", "Edm.String")
                 nullable = prop.attrib.get("Nullable", "true").lower() == "true"
-                creatable = prop.attrib.get(f"{SAP_NS}creatable", "true").lower() == "true"
-                updatable = prop.attrib.get(f"{SAP_NS}updatable", "true").lower() == "true"
+                
+                req_val = _get_sap_attr(prop, "required", "false").lower() == "true"
+                required = req_val or not nullable
+
+                creatable = _get_sap_attr(prop, "creatable", "true").lower() == "true"
+                updatable = _get_sap_attr(prop, "updatable", "true").lower() == "true"
+                upsertable = _get_sap_attr(prop, "upsertable", "true").lower() == "true"
+                visible = _get_sap_attr(prop, "visible", "true").lower() == "true"
+
                 max_len_str = prop.attrib.get("MaxLength")
                 max_len = int(max_len_str) if max_len_str and max_len_str.isdigit() else None
-                label = prop.attrib.get(f"{SAP_NS}label")
+
+                picklist_id = _get_sap_attr(prop, "picklist")
+                display_format = _get_sap_attr(prop, "display-format")
+                label = _get_sap_attr(prop, "label")
 
                 schema.properties[pname] = EntityProperty(
                     name=pname,
                     type=ptype,
                     nullable=nullable,
+                    required=required,
                     creatable=creatable,
                     updatable=updatable,
+                    upsertable=upsertable,
+                    visible=visible,
                     max_length=max_len,
+                    picklist_id=picklist_id,
+                    display_format=display_format,
                     label=label,
                 )
 
-            # Navigations
+            # 3. Navigation Properties
             for nav in et.findall(f"{EDM_NS}NavigationProperty"):
                 nname = nav.attrib.get("Name", "")
                 rel = nav.attrib.get("Relationship", "")
@@ -116,28 +175,68 @@ class MetadataEngine:
 
     def validate_payload(self, entity_name: str, payload: Dict[str, Any], is_upsert: bool = True) -> Dict[str, Any]:
         """
-        Validate and sanitize payload against the entity schema before API execution.
-        Strips properties that are definitively marked as non-creatable or not present in schema.
+        Strict Contract-First Validation:
+        1. Strips all read-only, non-upsertable system properties (e.g. mdfSystem*, createdDateTime, lastModified*).
+        2. Formats and coerces data types (Edm.DateTime -> /Date(...)/, Edm.Boolean -> bool).
+        3. Enforces string length limits and strips null values on optional fields.
         """
         schema = self.get_schema(entity_name)
         if not schema:
             return payload
 
-        sanitized = {}
+        sanitized: Dict[str, Any] = {}
+
+        # Preserve metadata header
+        if "__metadata" in payload:
+            sanitized["__metadata"] = payload["__metadata"]
+        else:
+            sanitized["__metadata"] = {"uri": entity_name}
+
+        # Known system properties that must never be written
+        system_readonly_prefixes = ("mdfSystem", "lastModified", "createdDate", "createdBy")
+
         for k, v in payload.items():
             if k == "__metadata":
-                sanitized[k] = v
+                continue
+
+            # Strip system fields
+            if any(k.startswith(pfx) for pfx in system_readonly_prefixes):
                 continue
 
             if k in schema.properties:
                 prop = schema.properties[k]
-                if is_upsert and not prop.creatable and not prop.updatable:
+                
+                # Check if writable
+                if not prop.is_writable:
                     continue  # Strip non-writable property
-                sanitized[k] = v
+
+                # Handle None values (omit optional nulls to avoid SF validation conflicts)
+                if v is None:
+                    if prop.required:
+                        pass  # Let required field handling or default take over
+                    else:
+                        continue
+
+                # Type coercion & formatting
+                val = v
+                if prop.type in ("Edm.DateTime", "Edm.DateTimeOffset") or prop.display_format == "Date":
+                    if val is not None and not str(val).startswith("/Date("):
+                        val = _format_date(str(val))
+                elif prop.type == "Edm.Boolean":
+                    if isinstance(val, str):
+                        val = val.lower() in ("true", "1", "yes", "y")
+                    elif isinstance(val, (int, float)):
+                        val = bool(val)
+                elif prop.type == "Edm.String" and prop.max_length and isinstance(val, str):
+                    if len(val) > prop.max_length:
+                        val = val[:prop.max_length]
+
+                sanitized[k] = val
+
             elif k in schema.nav_properties:
                 sanitized[k] = v
-            else:
-                # Custom fields or dynamic MDF properties
+            elif k.startswith("cust_") or k.startswith("customString"):
+                # Retain custom fields
                 sanitized[k] = v
 
         return sanitized
@@ -173,21 +272,43 @@ class PicklistResolver:
             return self._cache[picklist_id]
 
         try:
+            # 1. Try legacy Picklist API
             res = self.client.get(f"Picklist('{picklist_id}')", params={"$expand": "picklistOptions"})
             options = res.get("d", {}).get("picklistOptions", {}).get("results", [])
-            clean_opts = [
-                {
-                    "id": str(opt.get("id")),
-                    "externalCode": str(opt.get("externalCode") or ""),
-                    "status": opt.get("status"),
-                }
-                for opt in options
-            ]
-            self._cache[picklist_id] = clean_opts
-            self._save_cache()
-            return clean_opts
+            if options:
+                clean_opts = [
+                    {
+                        "id": str(opt.get("id")),
+                        "externalCode": str(opt.get("externalCode") or ""),
+                        "status": opt.get("status"),
+                    }
+                    for opt in options
+                ]
+                self._cache[picklist_id] = clean_opts
+                self._save_cache()
+                return clean_opts
+
+            # 2. Try MDF PickListV2 API fallback
+            mdf_res = self.client.get("PickListValueV2", params={"$filter": f"PickListV2_id eq '{picklist_id}' and status eq 'A'"})
+            mdf_options = mdf_res.get("d", {}).get("results", [])
+            if mdf_options:
+                clean_opts = [
+                    {
+                        "id": str(opt.get("externalCode")),
+                        "externalCode": str(opt.get("externalCode") or ""),
+                        "status": opt.get("status"),
+                        "label": opt.get("label_defaultValue", opt.get("externalCode")),
+                    }
+                    for opt in mdf_options
+                ]
+                self._cache[picklist_id] = clean_opts
+                self._save_cache()
+                return clean_opts
+
         except Exception:
-            return []
+            pass
+
+        return []
 
     def resolve(self, picklist_id: str, value: Any, default: Optional[str] = None) -> Optional[str]:
         """
@@ -199,7 +320,7 @@ class PicklistResolver:
         val_str = str(value).strip()
         options = self.get_picklist_options(picklist_id)
         if not options:
-            return val_str
+            return default or val_str
 
         # 1. Exact ID match
         for opt in options:
@@ -208,12 +329,17 @@ class PicklistResolver:
 
         # 2. Exact externalCode match (case-insensitive)
         for opt in options:
-            if opt["externalCode"].lower() == val_str.lower():
+            if opt.get("externalCode", "").lower() == val_str.lower():
                 return opt["id"] if opt["id"] != "None" else opt["externalCode"]
 
-        # 3. Partial match on externalCode
+        # 3. Label match
         for opt in options:
-            if val_str.lower() in opt["externalCode"].lower() or opt["externalCode"].lower() in val_str.lower():
+            if opt.get("label", "").lower() == val_str.lower():
+                return opt["id"]
+
+        # 4. Partial match on externalCode or label
+        for opt in options:
+            if val_str.lower() in opt.get("externalCode", "").lower() or val_str.lower() in opt.get("label", "").lower():
                 return opt["id"]
 
         return default or val_str
@@ -224,4 +350,7 @@ class PicklistResolver:
         if not query:
             return options
         q = query.lower()
-        return [opt for opt in options if q in opt["id"].lower() or q in opt["externalCode"].lower()]
+        return [
+            opt for opt in options
+            if q in opt.get("id", "").lower() or q in opt.get("externalCode", "").lower() or q in opt.get("label", "").lower()
+        ]
